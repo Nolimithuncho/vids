@@ -199,7 +199,13 @@ SEGMENT_SYSTEM = """You are watching one chunk of a longer video, frame by frame
 Describe what actually happens in this chunk as precisely as you can: who and what is on screen, actions,
 settings, scene changes, on-screen text, and what is said. Use absolute timestamps in seconds from the start
 of the whole video (the frame labels give them). Only describe what the frames and transcript support; if
-something is unclear, say so instead of guessing. Frames are samples, so action between frames is unknown."""
+something is unclear, say so instead of guessing. Frames are samples, so action between frames is unknown.
+
+In `steps`, list every distinct action performed or shown, in order, as someone would need it to reproduce
+what happens: what is done, to what, with what, in which order, with quantities, settings, clicks, commands,
+or values exactly as seen or said. A step that started in an earlier chunk or continues past this one still
+gets listed with this chunk's part of it. Leave `steps` empty only if nothing is actually done (for example
+pure scenery or a monologue with no actions)."""
 
 
 def analyze_segment(vdir: Path, seg: dict, frames: list[dict], transcript: list[dict], duration: float) -> dict:
@@ -231,7 +237,13 @@ SYNTH_SYSTEM = """You have detailed notes on every chunk of a video, written by 
 plus the full speech transcript. Write the definitive analysis of the whole video: what it is, what happens,
 how it is structured, who is in it, and what a viewer should take away. Chapters must cover the whole video
 in order with no gaps and use seconds from the start. Quotes must be verbatim from the transcript. Be specific
-and concrete; this report replaces watching the video."""
+and concrete; this report replaces watching the video.
+
+`step_by_step` is the complete ordered procedure shown in the video, merged across chunks (a step split over
+two chunks becomes one step). Write each step's instructions so someone could follow them without the video:
+exact actions, values, settings, quantities, commands and on-screen labels. Steps must be in order and their
+time ranges must point to where each step is shown. For a video that is not a process (a vlog, a film, a
+talk), give the sequence of events in the same format instead."""
 
 
 def synthesize(meta: dict, notes: list[dict], transcript: list[dict]) -> dict:

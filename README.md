@@ -1,18 +1,24 @@
 # Vid Explains
 
-Upload a video (any length) and get a full breakdown of it: a summary, chapters, a scene-by-scene
-description with thumbnails, the full transcript, and a chat where you can ask anything about it.
-Every timestamp is clickable and jumps the player to that moment.
+Upload a video (any length) and get a full breakdown of it: a summary, a numbered step-by-step
+procedure of what is done in the video, chapters, a scene-by-scene description with thumbnails, the full
+transcript, and a chat where you can ask anything about it. Every timestamp is clickable and jumps the
+player to that moment.
+
+You can also cut the video up: every step, chapter and scene has a ✂ Clip button, the Clips tab cuts any
+custom range, and "Split the whole video" turns it into one file per chapter, step or scene, as a zip.
 
 ## How it works
 
 1. **Upload.** The file streams straight to disk, so multi-GB videos are fine.
 2. **Transcribe.** ffmpeg pulls out the audio and [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
    transcribes it locally (free, no upload).
-3. **Sample frames.** The video is cut into 5 minute chunks and 20 frames are sampled from each one.
+3. **Sample frames.** The video is cut into 5 minute chunks and 30 frames are sampled from each one (one every 10 seconds).
 4. **Watch.** Each chunk's frames plus its slice of the transcript go to Claude (`claude-opus-5-5`), which
-   writes structured notes: scenes, key moments, people, objects, on-screen text. Chunks run 4 at a time.
-5. **Report.** Claude reads all the chunk notes and the full transcript and writes the final report.
+   writes structured notes: every action performed (with exact values, settings and quantities), scenes,
+   key moments, people, objects, on-screen text. Chunks run 4 at a time.
+5. **Report.** Claude reads all the chunk notes and the full transcript and writes the final report,
+   including one merged, ordered step-by-step procedure someone could follow without the video.
 6. **Ask.** Questions are answered from the report, the chunk notes, and the transcript, with timestamps.
 
 Each stage saves its output, so if something fails (or you restart the server) **Retry** continues where it
@@ -38,9 +44,19 @@ The first run downloads the Whisper model (about 500 MB for `small`). With an NV
 much faster; on CPU, expect very roughly 1 minute of processing per 5 to 10 minutes of audio with `small`.
 Set `VID_WHISPER_MODEL=base` for speed or `large-v3` for accuracy.
 
+## Cutting clips
+
+- **Precise** (default) re-encodes the clip so it starts on the exact frame. It takes roughly as long as
+  the clip is, faster on a good CPU.
+- **Fast cut** copies the video without re-encoding, so it is near-instant even on huge files, but it can
+  start a few seconds early (at the nearest keyframe).
+
+Clips and split zips are saved under `data/videos/<id>/clips/`, so downloading the same one again is
+instant. Delete that folder to free disk space.
+
 ## Cost
 
-You pay for Claude API usage. As a rough estimate, a 5 minute chunk is about 10k input tokens (mostly
+You pay for Claude API usage. As a rough estimate, a 5 minute chunk is about 15k input tokens (mostly
 images) plus a few thousand output tokens, which comes to roughly **$1 to $3 per hour of video** with
 `claude-opus-5-5` at the default settings. Ways to lower it: `VID_MODEL=claude-sonnet-5-5`, fewer
 `VID_FRAMES_PER_SEGMENT`, or longer `VID_SEGMENT_SECONDS`. Q&A reuses a cached copy of the video's notes,

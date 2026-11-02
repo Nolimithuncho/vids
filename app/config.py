@@ -29,7 +29,7 @@ PARALLEL_SEGMENTS = int(os.environ.get("VID_PARALLEL_SEGMENTS", "4"))
 
 # Video chunking
 SEGMENT_SECONDS = int(os.environ.get("VID_SEGMENT_SECONDS", "300"))  # 5 minute chunks
-FRAMES_PER_SEGMENT = int(os.environ.get("VID_FRAMES_PER_SEGMENT", "20"))
+FRAMES_PER_SEGMENT = int(os.environ.get("VID_FRAMES_PER_SEGMENT", "30"))
 MIN_FRAME_GAP = float(os.environ.get("VID_MIN_FRAME_GAP", "2"))  # seconds
 FRAME_WIDTH = int(os.environ.get("VID_FRAME_WIDTH", "768"))
 

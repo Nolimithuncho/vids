@@ -38,7 +38,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
 .sticky { position: sticky; top: 16px; }
 video { width: 100%; border-radius: 8px; background: #000; max-height: 60vh; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
-.tabs button { background: none; border: none; color: var(--muted); padding: 8px 12px; cursor: pointer;
+.tabs button { background: none; border: none; color: var(--muted); padding: 8px 9px; cursor: pointer;
                font: inherit; border-bottom: 2px solid transparent; }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 h2 { font-size: 20px; margin: 0 0 4px; } h3 { font-size: 15px; margin: 20px 0 6px; }
@@ -61,6 +61,20 @@ button.primary:disabled { opacity: .5; cursor: default; }
 button.link { background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
 ul { padding-left: 20px; margin: 4px 0; }
 .err { color: var(--err); }
+a.clip { font-size: 13px; color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 6px;
+         padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
+a.clip:hover { color: var(--accent); border-color: var(--accent); }
+.step { padding: 12px 0; border-top: 1px solid var(--line); }
+.step .num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+             background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; margin-right: 6px; }
+.step .instr { margin: 6px 0 0; white-space: pre-wrap; }
+.step .meta { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.row input[type=text] { flex: 0 0 110px; width: 110px; min-width: 0; }
+#splitStatus a { color: var(--accent); }
+button.ghost { background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 12px;
+               font: inherit; cursor: pointer; }
+button.ghost:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -163,13 +177,16 @@ async function videoPage(id) {
   $("#app").innerHTML = `
     <div class="layout">
       <div class="sticky"><video controls preload="metadata" src="/api/videos/${id}/file"></video>
-        <p class="muted">${esc(d.meta.filename)} · ${fmt(d.meta.duration)} · <button class="link" onclick="del('${id}')">delete</button></p></div>
+        <p class="muted">${esc(d.meta.filename)} · ${fmt(d.meta.duration)} · <button class="link" onclick="reanalyze('${id}')">re-analyze</button> · <button class="link" onclick="del('${id}')">delete</button></p></div>
       <div class="panel">
-        <div class="tabs">${["Overview","Chapters","Scenes","Transcript","Ask"].map((t,i) =>
+        <div class="tabs">${["Overview","Steps","Chapters","Scenes","Transcript","Clips","Ask"].map((t,i) =>
           `<button data-tab="${t}" class="${i?"":"on"}">${t}</button>`).join("")}</div>
         <div id="tab"></div>
       </div>
     </div>`;
+  const clipBtn = (start, end, name) =>
+    `<a class="clip" download title="Download this section as a video" href="/api/videos/${id}/clip?start=${start}&end=${end}&name=${encodeURIComponent(name)}">✂ Clip</a>`;
+  const steps = r.step_by_step || [];
   const tabs = {
     Overview: () => `
       <h2>${esc(r.title)}</h2><p class="muted">${esc(r.one_line_summary)}</p>
@@ -181,20 +198,43 @@ async function videoPage(id) {
       ${r.notable_quotes.length ? `<h3>Notable quotes</h3>${r.notable_quotes.map(q =>
         `<p>${ts(q.time_seconds)} “${esc(q.quote)}” <span class="muted">— ${esc(q.speaker)}</span></p>`).join("")}` : ""}
       ${r.content_notes.length ? `<h3>Content notes</h3><ul>${r.content_notes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}`,
+    Steps: () => steps.length ? steps.map(st => `
+      <div class="step"><span class="num">${st.number}</span><strong>${esc(st.title)}</strong>
+        <span class="muted">${ts(st.start_seconds)} – ${fmt(st.end_seconds)}</span>${clipBtn(st.start_seconds, st.end_seconds, `Step ${st.number} ${st.title}`)}
+        <p class="instr">${esc(st.instructions)}</p>
+        ${st.tools_or_materials.length ? `<div class="meta">Uses: ${st.tools_or_materials.map(esc).join(", ")}</div>` : ""}
+        ${st.tips_or_warnings.length ? `<div class="meta">Tips: ${st.tips_or_warnings.map(esc).join(" · ")}</div>` : ""}
+      </div>`).join("") : `<p class="muted">No step-by-step breakdown for this video. Videos analyzed before this feature existed need a re-run.</p>`,
     Chapters: () => r.chapters.map(c => `
-      <div class="chapter">${ts(c.start_seconds)} – ${fmt(c.end_seconds)} <strong>${esc(c.title)}</strong><div>${esc(c.summary)}</div></div>`).join(""),
+      <div class="chapter">${ts(c.start_seconds)} – ${fmt(c.end_seconds)} <strong>${esc(c.title)}</strong>${clipBtn(c.start_seconds, c.end_seconds, c.title)}<div>${esc(c.summary)}</div></div>`).join(""),
     Scenes: () => {
       const frames = d.frames || [];
       const near = t => frames.reduce((b, f) => !b || Math.abs(f.time - t) < Math.abs(b.time - t) ? f : b, null);
       return d.segments.flatMap(sg => sg.scenes).map(sc => {
         const f = near((sc.start_seconds + sc.end_seconds) / 2);
         return `<div class="scene">${f ? `<img loading="lazy" src="/api/videos/${id}/frames/${f.file}" data-t="${sc.start_seconds}">` : "<div></div>"}
-          <div>${ts(sc.start_seconds)} – ${fmt(sc.end_seconds)} <strong>${esc(sc.title)}</strong><div>${esc(sc.description)}</div></div></div>`;
+          <div>${ts(sc.start_seconds)} – ${fmt(sc.end_seconds)} <strong>${esc(sc.title)}</strong>${clipBtn(sc.start_seconds, sc.end_seconds, sc.title)}<div>${esc(sc.description)}</div></div></div>`;
       }).join("");
     },
     Transcript: () => d.transcript.length
       ? `<div class="transcript">${d.transcript.map(t => `<p data-start="${t.start}">${ts(t.start)} ${esc(t.text)}</p>`).join("")}</div>`
       : `<p class="muted">No speech was detected in this video.</p>`,
+    Clips: () => `
+      <h3 style="margin-top:0">Cut a custom clip</h3>
+      <p class="muted">Type times like 1:05 or 1:02:30, or play the video to a spot and press “Set”.</p>
+      <div class="row">Start <input type="text" id="cs" value="0:00"> <button class="ghost" data-set="cs">Set to now</button></div>
+      <div class="row">End <input type="text" id="ce" value="${fmt(Math.min(60, d.meta.duration))}"> <button class="ghost" data-set="ce">Set to now</button></div>
+      <div class="row"><label><input type="checkbox" id="cfast"> Fast cut (instant, but may start a few seconds early)</label></div>
+      <div class="row"><button class="primary" id="cutBtn">Download clip</button> <span id="cutMsg" class="muted"></span></div>
+      <h3>Split the whole video</h3>
+      <p class="muted">Cuts every section into its own file and bundles them as a zip.</p>
+      <div class="row">
+        <button class="ghost" data-split="chapters">By chapters (${r.chapters.length})</button>
+        <button class="ghost" data-split="steps" ${steps.length ? "" : "disabled"}>By steps (${steps.length})</button>
+        <button class="ghost" data-split="scenes">By scenes (${d.segments.reduce((n, sg) => n + sg.scenes.length, 0)})</button>
+      </div>
+      <div id="splitStatus"></div>
+      <p class="muted">Every chapter, step and scene also has its own ✂ Clip button.</p>`,
     Ask: () => `<div class="chat" id="chat"><p class="muted">Ask anything about the video, e.g. “What happens right after the intro?” or “Does anyone mention a price?”</p></div>
       <form class="ask" id="askForm"><input type="text" id="q" placeholder="Ask about the video…" autocomplete="off"><button class="primary">Ask</button></form>
       <p><button class="link" id="clearChat">Clear conversation</button></p>`,
@@ -203,6 +243,7 @@ async function videoPage(id) {
     document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
     $("#tab").innerHTML = tabs[name]();
     if (name === "Ask") setupChat(id);
+    if (name === "Clips") setupClips(id, d);
   };
   document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => show(b.dataset.tab));
   show("Overview");
@@ -235,6 +276,44 @@ async function setupChat(id) {
   };
 }
 
+const parseTime = t => t.trim().split(":").reduce((acc, p) => acc * 60 + parseFloat(p || 0), 0);
+
+function setupClips(id, d) {
+  document.querySelectorAll("[data-set]").forEach(b => b.onclick = () => $("#" + b.dataset.set).value = fmt($("video").currentTime));
+  $("#cutBtn").onclick = () => {
+    const s = parseTime($("#cs").value), e = parseTime($("#ce").value);
+    if (!(e > s)) { $("#cutMsg").innerHTML = `<span class="err">The end has to be after the start.</span>`; return; }
+    $("#cutMsg").textContent = "Cutting… your download starts when it's ready.";
+    location.href = `/api/videos/${id}/clip?start=${s}&end=${e}&precise=${!$("#cfast").checked}&name=${encodeURIComponent(d.meta.filename.replace(/\.[^.]+$/, ""))}`;
+  };
+  document.querySelectorAll("[data-split]").forEach(b => b.onclick = async () => {
+    const res = await fetch(`/api/videos/${id}/split`, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({by: b.dataset.split, precise: !$("#cfast").checked})});
+    if (!res.ok) { $("#splitStatus").innerHTML = `<p class="err">${esc((await res.json()).detail)}</p>`; return; }
+    pollSplit(id);
+  });
+  pollSplit(id);
+}
+
+async function pollSplit(id) {
+  const el = $("#splitStatus"); if (!el) return;
+  const sp = (await (await fetch(`/api/videos/${id}`)).json()).status.split;
+  if (!sp) return;
+  if (sp.state === "running") {
+    el.innerHTML = `<p>Splitting by ${sp.by}: ${sp.done} of ${sp.total || "?"} done</p><div class="bar"><div style="width:${sp.total ? sp.done/sp.total*100 : 0}%"></div></div>`;
+    setTimeout(() => pollSplit(id), 2000);
+  } else if (sp.state === "done") {
+    el.innerHTML = `<p>✓ Split by ${sp.by} is ready: <a href="/api/videos/${id}/split/${encodeURIComponent(sp.file)}">download ${esc(sp.file)}</a></p>`;
+  } else if (sp.state === "error") {
+    el.innerHTML = `<p class="err">Split failed: ${esc(sp.error)}</p>`;
+  }
+}
+
+async function reanalyze(id) {
+  if (!confirm("Run the AI analysis again? The transcript and frames are kept; this costs API credits again.")) return;
+  const res = await fetch(`/api/videos/${id}/reanalyze`, {method: "POST"});
+  if (res.ok) videoPage(id); else alert((await res.json()).detail);
+}
 async function retry(id) { await fetch(`/api/videos/${id}/retry`, {method: "POST"}); videoPage(id); }
 async function del(id) {
   if (!confirm("Delete this video and its analysis?")) return;

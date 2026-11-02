@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, llm, pipeline
+from . import clips, config, llm, pipeline
 from .pipeline import fmt_ts, read_json, write_json
 
 app = FastAPI(title="Vid Explains")
@@ -149,6 +150,19 @@ def retry(video_id: str):
     return {"ok": True}
 
 
+@app.post("/api/videos/{video_id}/reanalyze")
+def reanalyze(video_id: str):
+    """Redo the Claude part (chunk notes + report), keeping the transcript and frames."""
+    vdir = _vdir(video_id)
+    if video_id in _running:
+        raise HTTPException(409, "Still processing")
+    shutil.rmtree(vdir / "segments", ignore_errors=True)
+    (vdir / "report.json").unlink(missing_ok=True)
+    pipeline.Job(vdir).update(state="queued", stage="queued", error=None)
+    _start(video_id)
+    return {"ok": True}
+
+
 @app.delete("/api/videos/{video_id}")
 def delete(video_id: str):
     _vdir(video_id)
@@ -156,6 +170,51 @@ def delete(video_id: str):
         raise HTTPException(409, "Still processing")
     pipeline.delete(video_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- clips
+
+
+@app.get("/api/videos/{video_id}/clip")
+def clip(video_id: str, start: float, end: float, name: str = "clip", precise: bool = True):
+    """Cut [start, end] out of the video and download it as an MP4."""
+    vdir = _vdir(video_id)
+    meta = read_json(vdir / "meta.json")
+    duration = meta.get("duration") or pipeline.probe(vdir / meta["stored_name"])["duration"]
+    start, end = max(0.0, start), min(end, duration)
+    if end - start < 0.1:
+        raise HTTPException(400, "The clip's end must be after its start")
+    path = clips.cut(vdir / meta["stored_name"], start, end, clips.clip_path(vdir, start, end, precise), precise)
+    filename = f"{clips.safe_name(name)} [{fmt_ts(start).replace(':', '.')}-{fmt_ts(end).replace(':', '.')}].mp4"
+    return FileResponse(path, media_type="video/mp4", filename=filename)
+
+
+class SplitBody(BaseModel):
+    by: str = "chapters"  # chapters | steps | scenes
+    precise: bool = True
+
+
+@app.post("/api/videos/{video_id}/split")
+def split(video_id: str, body: SplitBody):
+    """Start cutting the whole video into its chapters, steps or scenes, bundled as a zip."""
+    vdir = _vdir(video_id)
+    if body.by not in ("chapters", "steps", "scenes"):
+        raise HTTPException(400, "by must be chapters, steps or scenes")
+    if not (vdir / "report.json").exists():
+        raise HTTPException(409, "The video is still being analyzed")
+    if (read_json(vdir / "status.json", {}).get("split") or {}).get("state") == "running":
+        raise HTTPException(409, "A split is already running for this video")
+    pipeline.Job(vdir).update(split={"by": body.by, "state": "running", "done": 0, "total": 0})
+    threading.Thread(target=clips.split_all, args=(video_id, body.by, body.precise), daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/videos/{video_id}/split/{name}")
+def split_download(video_id: str, name: str):
+    path = _vdir(video_id) / "clips" / name
+    if "/" in name or ".." in name or not name.endswith(".zip") or not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="application/zip", filename=name)
 
 
 # ---------------------------------------------------------------- Q&A
