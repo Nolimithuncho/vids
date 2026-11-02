@@ -1,0 +1,220 @@
+"""FastAPI server: upload, job status, results, Q&A, and the web UI."""
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import anthropic
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from . import config, llm, pipeline
+from .pipeline import fmt_ts, read_json, write_json
+
+app = FastAPI(title="Vid Explains")
+STATIC = Path(__file__).resolve().parent.parent / "static"
+ALLOWED = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpg", ".mpeg", ".wmv", ".flv", ".ts"}
+
+_running: set[str] = set()
+_running_lock = threading.Lock()
+
+
+def _start(video_id: str) -> None:
+    with _running_lock:
+        if video_id in _running:
+            return
+        _running.add(video_id)
+
+    def work():
+        try:
+            pipeline.run(video_id)
+        finally:
+            with _running_lock:
+                _running.discard(video_id)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _vdir(video_id: str) -> Path:
+    if not re.fullmatch(r"[a-f0-9]{12}", video_id):
+        raise HTTPException(404, "Unknown video")
+    vdir = config.VIDEOS_DIR / video_id
+    if not (vdir / "meta.json").exists():
+        raise HTTPException(404, "Unknown video")
+    return vdir
+
+
+@app.on_event("startup")
+def resume_unfinished() -> None:
+    """Pick interrupted jobs back up after a restart; finished stages are skipped."""
+    for vdir in config.VIDEOS_DIR.iterdir():
+        status = read_json(vdir / "status.json", {})
+        if status.get("state") in ("queued", "running"):
+            _start(vdir.name)
+
+
+# ---------------------------------------------------------------- upload
+
+
+@app.post("/api/videos")
+async def upload(request: Request, filename: str):
+    """Streams the raw request body straight to disk, so multi-GB files never sit in memory."""
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED:
+        raise HTTPException(400, f"Unsupported file type {ext or '(none)'}")
+    video_id = uuid.uuid4().hex[:12]
+    vdir = config.VIDEOS_DIR / video_id
+    vdir.mkdir(parents=True)
+    stored = f"video{ext}"
+    size = 0
+    try:
+        with open(vdir / stored, "wb") as f:
+            async for chunk in request.stream():
+                f.write(chunk)
+                size += len(chunk)
+    except Exception:
+        pipeline.delete(video_id)
+        raise HTTPException(400, "Upload was interrupted")
+    if size == 0:
+        pipeline.delete(video_id)
+        raise HTTPException(400, "Empty file")
+    write_json(vdir / "meta.json", {
+        "id": video_id, "filename": Path(filename).name, "stored_name": stored, "uploaded_at": time.time(),
+    })
+    pipeline.Job(vdir).update(state="queued", stage="queued", progress=0)
+    _start(video_id)
+    return {"id": video_id}
+
+
+# ---------------------------------------------------------------- read
+
+
+@app.get("/api/videos")
+def list_videos():
+    items = []
+    for vdir in config.VIDEOS_DIR.iterdir():
+        meta = read_json(vdir / "meta.json")
+        if not meta:
+            continue
+        report = read_json(vdir / "report.json") or {}
+        items.append({**meta, "status": read_json(vdir / "status.json", {}), "title": report.get("title")})
+    items.sort(key=lambda m: m.get("uploaded_at", 0), reverse=True)
+    return items
+
+
+@app.get("/api/videos/{video_id}")
+def get_video(video_id: str):
+    vdir = _vdir(video_id)
+    seg_dir = vdir / "segments"
+    segments = sorted(
+        (read_json(p) for p in seg_dir.glob("*.json")), key=lambda s: s["index"]
+    ) if seg_dir.exists() else []
+    return {
+        "meta": read_json(vdir / "meta.json"),
+        "status": read_json(vdir / "status.json", {}),
+        "report": read_json(vdir / "report.json"),
+        "segments": segments,
+        "transcript": read_json(vdir / "transcript.json"),
+        "frames": read_json(vdir / "frames.json"),
+    }
+
+
+@app.get("/api/videos/{video_id}/file")
+def video_file(video_id: str):
+    vdir = _vdir(video_id)
+    return FileResponse(vdir / read_json(vdir / "meta.json")["stored_name"])  # supports range requests
+
+
+@app.get("/api/videos/{video_id}/frames/{name}")
+def frame(video_id: str, name: str):
+    if not re.fullmatch(r"[0-9.]+\.jpg", name):
+        raise HTTPException(404)
+    path = _vdir(video_id) / "frames" / name
+    if not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.post("/api/videos/{video_id}/retry")
+def retry(video_id: str):
+    vdir = _vdir(video_id)
+    pipeline.Job(vdir).update(state="queued", stage="queued", error=None)
+    _start(video_id)
+    return {"ok": True}
+
+
+@app.delete("/api/videos/{video_id}")
+def delete(video_id: str):
+    _vdir(video_id)
+    if video_id in _running:
+        raise HTTPException(409, "Still processing")
+    pipeline.delete(video_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- Q&A
+
+
+class AskBody(BaseModel):
+    question: str
+
+
+def _qa_context(vdir: Path) -> str:
+    meta = read_json(vdir / "meta.json")
+    report = read_json(vdir / "report.json")
+    notes = [read_json(p) for p in sorted((vdir / "segments").glob("*.json"))]
+    transcript = read_json(vdir / "transcript.json", [])
+    return (
+        f"Video file: {meta['filename']} ({fmt_ts(meta['duration'])})\n\n"
+        f"<report>\n{json.dumps(report, ensure_ascii=False)}\n</report>\n\n"
+        f"<chunk_notes>\n{json.dumps(notes, ensure_ascii=False)}\n</chunk_notes>\n\n"
+        f"<transcript>\n{pipeline.transcript_text(transcript)}\n</transcript>"
+    )
+
+
+@app.get("/api/videos/{video_id}/chat")
+def chat_history(video_id: str):
+    return read_json(_vdir(video_id) / "chat.json", [])
+
+
+@app.post("/api/videos/{video_id}/ask")
+def ask(video_id: str, body: AskBody):
+    vdir = _vdir(video_id)
+    if not (vdir / "report.json").exists():
+        raise HTTPException(409, "The video is still being analyzed")
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(400, "Empty question")
+    history = read_json(vdir / "chat.json", [])
+    try:
+        answer = llm.ask(_qa_context(vdir), history[-20:], question)
+    except llm.RefusalError as e:
+        raise HTTPException(422, str(e))
+    except anthropic.APIError as e:
+        raise HTTPException(502, f"Claude API error: {e}")
+    history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+    write_json(vdir / "chat.json", history)
+    return {"answer": answer}
+
+
+@app.delete("/api/videos/{video_id}/chat")
+def clear_chat(video_id: str):
+    (_vdir(video_id) / "chat.json").unlink(missing_ok=True)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- UI
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")

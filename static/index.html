@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vid Explains</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+  --accent: #c2410c; --accent-soft: #fdeee6; --ok: #15803d; --err: #b91c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151514; --panel: #1f1f1d; --text: #ecebe6; --muted: #9b9a93; --line: #33322f;
+          --accent: #fb923c; --accent-soft: #3a2418; --ok: #4ade80; --err: #f87171; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 16px 24px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 18px; margin: 0; cursor: pointer; }
+header span { color: var(--muted); font-size: 13px; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 40px 20px; text-align: center; cursor: pointer; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop strong { display: block; font-size: 17px; margin-bottom: 4px; }
+.muted { color: var(--muted); }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.list { margin-top: 20px; display: grid; gap: 10px; }
+.item { display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; }
+.item:hover { border-color: var(--accent); }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--line); white-space: nowrap; }
+.badge.done { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.error { background: color-mix(in srgb, var(--err) 20%, transparent); color: var(--err); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+.sticky { position: sticky; top: 16px; }
+video { width: 100%; border-radius: 8px; background: #000; max-height: 60vh; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
+.tabs button { background: none; border: none; color: var(--muted); padding: 8px 12px; cursor: pointer;
+               font: inherit; border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+h2 { font-size: 20px; margin: 0 0 4px; } h3 { font-size: 15px; margin: 20px 0 6px; }
+.ts { color: var(--accent); cursor: pointer; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.ts:hover { text-decoration: underline; }
+.chapter { padding: 10px 0; border-top: 1px solid var(--line); }
+.scene { display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.scene img { width: 120px; border-radius: 6px; cursor: pointer; }
+.transcript p { margin: 0 0 6px; } .transcript p.now { background: var(--accent-soft); }
+.chat { display: flex; flex-direction: column; gap: 10px; }
+.msg { padding: 10px 14px; border-radius: 10px; white-space: pre-wrap; }
+.msg.user { background: var(--accent-soft); align-self: flex-end; max-width: 85%; }
+.msg.assistant { border: 1px solid var(--line); }
+form.ask { display: flex; gap: 8px; margin-top: 12px; }
+input[type=text] { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+                   background: var(--bg); color: var(--text); font: inherit; }
+button.primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 10px 16px;
+                 font: inherit; cursor: pointer; }
+button.primary:disabled { opacity: .5; cursor: default; }
+button.link { background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
+ul { padding-left: 20px; margin: 4px 0; }
+.err { color: var(--err); }
+</style>
+</head>
+<body>
+<header><h1 onclick="location.hash=''">🎬 Vid Explains</h1><span>Upload a video. It watches the whole thing and tells you everything about it.</span></header>
+<main id="app"></main>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = sec => { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`; };
+const fmtSize = b => b > 1e9 ? (b/1e9).toFixed(1)+" GB" : (b/1e6).toFixed(0)+" MB";
+const ts = sec => `<span class="ts" data-t="${sec}">${fmt(sec)}</span>`;
+// Turn [12:34] / [1:02:03] citations in answers into clickable timestamps.
+const linkify = text => esc(text).replace(/\[(\d{1,2}:)?(\d{1,2}):(\d{2})\]/g, (m, h, mm, ss) =>
+  ts((h ? parseInt(h)*3600 : 0) + parseInt(mm)*60 + parseInt(ss)));
+let pollTimer = null;
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-t]");
+  if (t) { const v = $("video"); if (v) { v.currentTime = +t.dataset.t; v.play(); } }
+});
+
+// ------------------------------------------------------------------ home
+async function home() {
+  $("#app").innerHTML = `
+    <div class="panel">
+      <label class="drop" id="drop">
+        <strong>Drop a video here, or click to choose</strong>
+        <span class="muted">MP4, MOV, MKV, WebM, AVI… any length</span>
+        <input type="file" accept="video/*" hidden id="file">
+      </label>
+      <div id="upl" hidden><div id="uplText" class="muted"></div><div class="bar"><div id="uplBar"></div></div></div>
+    </div>
+    <div class="list" id="list"></div>`;
+  const drop = $("#drop");
+  $("#file").onchange = e => e.target.files[0] && upload(e.target.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]); };
+  const refresh = async () => {
+    const items = await (await fetch("/api/videos")).json();
+    $("#list").innerHTML = items.map(v => `
+      <div class="panel item" onclick="location.hash='${v.id}'">
+        <div><strong>${esc(v.title || v.filename)}</strong><div class="muted">${esc(v.filename)}${v.duration ? " · " + fmt(v.duration) : ""}</div></div>
+        <span class="badge ${v.status.state}">${statusLabel(v.status)}</span>
+      </div>`).join("");
+    if (items.some(v => ["queued","running"].includes(v.status.state))) pollTimer = setTimeout(refresh, 3000);
+  };
+  refresh();
+}
+
+function statusLabel(s) {
+  if (s.state === "done") return "Ready";
+  if (s.state === "error") return "Failed";
+  let label = s.stage || "queued";
+  if (s.stage === "watching" && s.segments_total) label += ` ${s.segments_done || 0}/${s.segments_total}`;
+  else if (s.progress) label += ` ${Math.round(s.progress*100)}%`;
+  return label;
+}
+
+function upload(file) {
+  $("#upl").hidden = false;
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/videos?filename=" + encodeURIComponent(file.name));
+  xhr.upload.onprogress = e => {
+    $("#uplBar").style.width = (e.loaded/e.total*100) + "%";
+    $("#uplText").textContent = `Uploading ${file.name}: ${fmtSize(e.loaded)} of ${fmtSize(e.total)}`;
+  };
+  xhr.onload = () => {
+    if (xhr.status === 200) location.hash = JSON.parse(xhr.responseText).id;
+    else $("#uplText").innerHTML = `<span class="err">Upload failed: ${esc(xhr.responseText)}</span>`;
+  };
+  xhr.onerror = () => $("#uplText").innerHTML = `<span class="err">Upload failed (network error)</span>`;
+  xhr.send(file);
+}
+
+// ------------------------------------------------------------------ video page
+async function videoPage(id) {
+  const res = await fetch(`/api/videos/${id}`);
+  if (!res.ok) { $("#app").innerHTML = `<p class="err">Video not found.</p>`; return; }
+  const d = await res.json();
+  const s = d.status;
+  if (s.state !== "done") {
+    $("#app").innerHTML = `
+      <div class="panel">
+        <h2>${esc(d.meta.filename)}</h2>
+        <p class="muted">${d.meta.duration ? fmt(d.meta.duration) + " long · " : ""}${s.state === "error" ? "" : "Analyzing. You can leave this page; it keeps going."}</p>
+        ${s.state === "error"
+          ? `<p class="err">${esc(s.error)}</p><button class="primary" onclick="retry('${id}')">Retry</button>
+             <p class="muted">Retry continues from where it stopped.</p>`
+          : `<div>${esc(statusLabel(s))}</div><div class="bar"><div style="width:${(s.progress||0)*100}%"></div></div>
+             <ol class="muted">${["probing","transcribing","sampling frames","watching","writing report"].map(st =>
+               `<li${st === s.stage ? ' style="color:var(--text);font-weight:600"' : ""}>${st}</li>`).join("")}</ol>`}
+      </div>`;
+    if (s.state !== "error") pollTimer = setTimeout(() => videoPage(id), 3000);
+    return;
+  }
+  const r = d.report;
+  $("#app").innerHTML = `
+    <div class="layout">
+      <div class="sticky"><video controls preload="metadata" src="/api/videos/${id}/file"></video>
+        <p class="muted">${esc(d.meta.filename)} · ${fmt(d.meta.duration)} · <button class="link" onclick="del('${id}')">delete</button></p></div>
+      <div class="panel">
+        <div class="tabs">${["Overview","Chapters","Scenes","Transcript","Ask"].map((t,i) =>
+          `<button data-tab="${t}" class="${i?"":"on"}">${t}</button>`).join("")}</div>
+        <div id="tab"></div>
+      </div>
+    </div>`;
+  const tabs = {
+    Overview: () => `
+      <h2>${esc(r.title)}</h2><p class="muted">${esc(r.one_line_summary)}</p>
+      <p style="white-space:pre-wrap">${esc(r.detailed_summary)}</p>
+      <h3>Genre and tone</h3><p>${esc(r.genre_and_tone)}</p>
+      <h3>Key takeaways</h3><ul>${r.key_takeaways.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      <h3>Main topics</h3><ul>${r.main_topics.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      <h3>People and characters</h3><ul>${r.people_and_characters.map(x => `<li>${esc(x)}</li>`).join("") || "<li class=muted>None identified</li>"}</ul>
+      ${r.notable_quotes.length ? `<h3>Notable quotes</h3>${r.notable_quotes.map(q =>
+        `<p>${ts(q.time_seconds)} “${esc(q.quote)}” <span class="muted">— ${esc(q.speaker)}</span></p>`).join("")}` : ""}
+      ${r.content_notes.length ? `<h3>Content notes</h3><ul>${r.content_notes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}`,
+    Chapters: () => r.chapters.map(c => `
+      <div class="chapter">${ts(c.start_seconds)} – ${fmt(c.end_seconds)} <strong>${esc(c.title)}</strong><div>${esc(c.summary)}</div></div>`).join(""),
+    Scenes: () => {
+      const frames = d.frames || [];
+      const near = t => frames.reduce((b, f) => !b || Math.abs(f.time - t) < Math.abs(b.time - t) ? f : b, null);
+      return d.segments.flatMap(sg => sg.scenes).map(sc => {
+        const f = near((sc.start_seconds + sc.end_seconds) / 2);
+        return `<div class="scene">${f ? `<img loading="lazy" src="/api/videos/${id}/frames/${f.file}" data-t="${sc.start_seconds}">` : "<div></div>"}
+          <div>${ts(sc.start_seconds)} – ${fmt(sc.end_seconds)} <strong>${esc(sc.title)}</strong><div>${esc(sc.description)}</div></div></div>`;
+      }).join("");
+    },
+    Transcript: () => d.transcript.length
+      ? `<div class="transcript">${d.transcript.map(t => `<p data-start="${t.start}">${ts(t.start)} ${esc(t.text)}</p>`).join("")}</div>`
+      : `<p class="muted">No speech was detected in this video.</p>`,
+    Ask: () => `<div class="chat" id="chat"><p class="muted">Ask anything about the video, e.g. “What happens right after the intro?” or “Does anyone mention a price?”</p></div>
+      <form class="ask" id="askForm"><input type="text" id="q" placeholder="Ask about the video…" autocomplete="off"><button class="primary">Ask</button></form>
+      <p><button class="link" id="clearChat">Clear conversation</button></p>`,
+  };
+  const show = name => {
+    document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+    $("#tab").innerHTML = tabs[name]();
+    if (name === "Ask") setupChat(id);
+  };
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => show(b.dataset.tab));
+  show("Overview");
+  // Highlight the transcript line that's playing.
+  $("video").ontimeupdate = e => {
+    const now = e.target.currentTime; let cur = null;
+    document.querySelectorAll(".transcript p").forEach(p => { p.classList.remove("now"); if (+p.dataset.start <= now) cur = p; });
+    cur?.classList.add("now");
+  };
+}
+
+async function setupChat(id) {
+  const chat = $("#chat");
+  const add = (role, text) => { chat.insertAdjacentHTML("beforeend",
+    `<div class="msg ${role}">${role === "assistant" ? linkify(text) : esc(text)}</div>`); return chat.lastElementChild; };
+  (await (await fetch(`/api/videos/${id}/chat`)).json()).forEach(m => add(m.role, m.content));
+  $("#clearChat").onclick = async () => { await fetch(`/api/videos/${id}/chat`, {method: "DELETE"}); chat.innerHTML = ""; };
+  $("#askForm").onsubmit = async e => {
+    e.preventDefault();
+    const q = $("#q").value.trim(); if (!q) return;
+    $("#q").value = ""; add("user", q);
+    const btn = $("#askForm button"); btn.disabled = true;
+    const pending = add("assistant", "Thinking…");
+    try {
+      const res = await fetch(`/api/videos/${id}/ask`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: q})});
+      const body = await res.json();
+      pending.innerHTML = res.ok ? linkify(body.answer) : `<span class="err">${esc(body.detail)}</span>`;
+    } catch { pending.innerHTML = `<span class="err">Request failed</span>`; }
+    btn.disabled = false;
+  };
+}
+
+async function retry(id) { await fetch(`/api/videos/${id}/retry`, {method: "POST"}); videoPage(id); }
+async function del(id) {
+  if (!confirm("Delete this video and its analysis?")) return;
+  const res = await fetch(`/api/videos/${id}`, {method: "DELETE"});
+  if (res.ok) location.hash = ""; else alert((await res.json()).detail);
+}
+
+function route() { clearTimeout(pollTimer); const id = location.hash.slice(1); id ? videoPage(id) : home(); }
+window.onhashchange = route; route();
+</script>
+</body>
+</html>
