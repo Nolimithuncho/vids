@@ -40,6 +40,14 @@ uvicorn app.main:app --port 8000
 
 Open http://localhost:8000 and drop in a video.
 
+### In VS Code
+
+1. Command Palette (Ctrl/Cmd+Shift+P) → **Git: Clone** → paste `https://github.com/Nolimithuncho/vids`, then open it.
+2. Install the **Python** extension when VS Code suggests it.
+3. Command Palette → **Python: Create Environment** → Venv → tick `requirements.txt`.
+4. Copy `.env.example` to `.env` and put your API key in it.
+5. Press **F5** (Run and Debug → "Run Vid Explains"), then open http://localhost:8000.
+
 The first run downloads the Whisper model (about 500 MB for `small`). With an NVIDIA GPU, transcription is
 much faster; on CPU, expect very roughly 1 minute of processing per 5 to 10 minutes of audio with `small`.
 Set `VID_WHISPER_MODEL=base` for speed or `large-v3` for accuracy.
