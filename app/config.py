@@ -21,11 +21,21 @@ DATA_DIR = Path(os.environ.get("VID_DATA_DIR", Path(__file__).resolve().parent.p
 VIDEOS_DIR = DATA_DIR / "videos"
 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Claude
-MODEL = os.environ.get("VID_MODEL", "claude-opus-5-5")
+# Which AI watches the videos: "gemini" (default, has a free tier) or "claude" (paid API)
+PROVIDER = os.environ.get("VID_PROVIDER", "gemini").strip().lower()
+
+# Gemini (free key at https://aistudio.google.com/apikey)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+GEMINI_MODEL = os.environ.get("VID_GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_BASE_URL = os.environ.get("VID_GEMINI_BASE_URL")  # only for testing against a mock server
+
+# Claude (needs ANTHROPIC_API_KEY)
+CLAUDE_MODEL = os.environ.get("VID_CLAUDE_MODEL") or os.environ.get("VID_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("VID_EFFORT", "medium")  # low | medium | high | xhigh | max
 USE_FALLBACKS = os.environ.get("VID_USE_FALLBACKS", "1") == "1"
-PARALLEL_SEGMENTS = int(os.environ.get("VID_PARALLEL_SEGMENTS", "4"))
+
+# Chunks analyzed at the same time. The Gemini free tier only allows a few requests a minute.
+PARALLEL_SEGMENTS = int(os.environ.get("VID_PARALLEL_SEGMENTS", "2" if PROVIDER == "gemini" else "4"))
 
 # Video chunking
 SEGMENT_SECONDS = int(os.environ.get("VID_SEGMENT_SECONDS", "300"))  # 5 minute chunks

@@ -9,7 +9,6 @@ import time
 import uuid
 from pathlib import Path
 
-import anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -255,8 +254,10 @@ def ask(video_id: str, body: AskBody):
         answer = llm.ask(_qa_context(vdir), history[-20:], question)
     except llm.RefusalError as e:
         raise HTTPException(422, str(e))
-    except anthropic.APIError as e:
-        raise HTTPException(502, f"Claude API error: {e}")
+    except llm.AIError as e:
+        raise HTTPException(502, str(e))
+    except Exception as e:  # provider SDK errors (network, auth, ...)
+        raise HTTPException(502, f"AI error: {type(e).__name__}: {e}")
     history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
     write_json(vdir / "chat.json", history)
     return {"answer": answer}

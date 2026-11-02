@@ -14,10 +14,11 @@ custom range, and "Split the whole video" turns it into one file per chapter, st
 2. **Transcribe.** ffmpeg pulls out the audio and [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
    transcribes it locally (free, no upload).
 3. **Sample frames.** The video is cut into 5 minute chunks and 30 frames are sampled from each one (one every 10 seconds).
-4. **Watch.** Each chunk's frames plus its slice of the transcript go to Claude (`claude-opus-5-5`), which
+4. **Watch.** Each chunk's frames plus its slice of the transcript go to the AI (Google Gemini by default,
+   or Claude), which
    writes structured notes: every action performed (with exact values, settings and quantities), scenes,
    key moments, people, objects, on-screen text. Chunks run 4 at a time.
-5. **Report.** Claude reads all the chunk notes and the full transcript and writes the final report,
+5. **Report.** The AI reads all the chunk notes and the full transcript and writes the final report,
    including one merged, ordered step-by-step procedure someone could follow without the video.
 6. **Ask.** Questions are answered from the report, the chunk notes, and the transcript, with timestamps.
 
@@ -34,18 +35,23 @@ cd vid-explains
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # then put your Anthropic API key in .env
+cp .env.example .env               # then put your Gemini API key in .env
 uvicorn app.main:app --port 8000
 ```
 
 Open http://localhost:8000 and drop in a video.
+
+### Getting a free Gemini API key
+
+Go to https://aistudio.google.com/apikey, sign in with a Google account, click **Create API key**, and
+copy it. No payment is needed for the free tier.
 
 ### In VS Code
 
 1. Command Palette (Ctrl/Cmd+Shift+P) → **Git: Clone** → paste `https://github.com/Nolimithuncho/vids`, then open it.
 2. Install the **Python** extension when VS Code suggests it.
 3. Command Palette → **Python: Create Environment** → Venv → tick `requirements.txt`.
-4. Copy `.env.example` to `.env` and put your API key in it.
+4. Create a file named `.env` containing one line: `GEMINI_API_KEY=your-key`.
 5. Press **F5** (Run and Debug → "Run Vid Explains"), then open http://localhost:8000.
 
 The first run downloads the Whisper model (about 500 MB for `small`). With an NVIDIA GPU, transcription is
@@ -62,13 +68,17 @@ Set `VID_WHISPER_MODEL=base` for speed or `large-v3` for accuracy.
 Clips and split zips are saved under `data/videos/<id>/clips/`, so downloading the same one again is
 instant. Delete that folder to free disk space.
 
-## Cost
+## Which AI, and cost
 
-You pay for Claude API usage. As a rough estimate, a 5 minute chunk is about 15k input tokens (mostly
-images) plus a few thousand output tokens, which comes to roughly **$1 to $3 per hour of video** with
-`claude-opus-5-5` at the default settings. Ways to lower it: `VID_MODEL=claude-sonnet-5-5`, fewer
-`VID_FRAMES_PER_SEGMENT`, or longer `VID_SEGMENT_SECONDS`. Q&A reuses a cached copy of the video's notes,
-so follow-up questions are cheap.
+**Gemini (default, `VID_PROVIDER=gemini`).** Free tier, no card needed. The free tier has per-minute and
+per-day request limits, so the app analyzes 2 chunks at a time and waits and retries automatically when it
+hits the per-minute limit. A long video can still use up the daily limit; if that happens the job stops
+with a message, and pressing **Retry** the next day continues where it left off. Note that Google may use
+data sent on the free tier to improve its products, so don't upload anything private. Change the model with
+`VID_GEMINI_MODEL`.
+
+**Claude (`VID_PROVIDER=claude`).** Paid API (a Claude Pro subscription does not include API access). Set
+`ANTHROPIC_API_KEY`. As a rough estimate, about $1 to $3 per hour of video with `claude-opus-5-5`.
 
 ## Settings
 
