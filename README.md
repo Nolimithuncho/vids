@@ -28,8 +28,7 @@ stopped instead of starting over.
 ## Setup
 
 Requirements: Python 3.10 to 3.13 (3.12 recommended; preview versions like 3.15 are not supported by
-faster-whisper yet), and ffmpeg on your PATH
-(`brew install ffmpeg`, `sudo apt install ffmpeg`, or `winget install ffmpeg`).
+faster-whisper yet). ffmpeg is used if installed; if not, the app downloads its own copy on first start.
 
 ```bash
 cd vid-explains

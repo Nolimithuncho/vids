@@ -17,6 +17,28 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
+
+def _ensure_ffmpeg() -> None:
+    """Use the system ffmpeg/ffprobe if installed; otherwise download a private copy once
+    (about 80 MB, via the static-ffmpeg package) so users don't have to install it themselves."""
+    import shutil
+
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+    try:
+        import static_ffmpeg
+
+        print("ffmpeg not found; downloading it once (this can take a minute)...", flush=True)
+        static_ffmpeg.add_paths(weak=True)
+    except Exception as exc:
+        raise SystemExit(
+            "Could not find or download ffmpeg. Install it yourself and try again "
+            f"(Mac: brew install ffmpeg, Windows: winget install ffmpeg). Details: {exc}"
+        )
+
+
+_ensure_ffmpeg()
+
 DATA_DIR = Path(os.environ.get("VID_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 VIDEOS_DIR = DATA_DIR / "videos"
 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)

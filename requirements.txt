@@ -4,3 +4,4 @@ faster-whisper>=1.1
 pydantic>=2.7
 google-genai>=1.50
 anthropic>=2.4.0
+static-ffmpeg>=2.7
