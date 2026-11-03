@@ -17,7 +17,7 @@ custom range, and "Split the whole video" turns it into one file per chapter, st
 4. **Watch.** Each chunk's frames plus its slice of the transcript go to the AI (Google Gemini by default,
    or Claude), which
    writes structured notes: every action performed (with exact values, settings and quantities), scenes,
-   key moments, people, objects, on-screen text. Chunks run 4 at a time.
+   key moments, people, objects, on-screen text. Chunks run 2 at a time (4 with Claude).
 5. **Report.** The AI reads all the chunk notes and the full transcript and writes the final report,
    including one merged, ordered step-by-step procedure someone could follow without the video.
 6. **Ask.** Questions are answered from the report, the chunk notes, and the transcript, with timestamps.
@@ -27,7 +27,8 @@ stopped instead of starting over.
 
 ## Setup
 
-Requirements: Python 3.10+, and ffmpeg on your PATH
+Requirements: Python 3.10 to 3.13 (3.12 recommended; preview versions like 3.15 are not supported by
+faster-whisper yet), and ffmpeg on your PATH
 (`brew install ffmpeg`, `sudo apt install ffmpeg`, or `winget install ffmpeg`).
 
 ```bash
