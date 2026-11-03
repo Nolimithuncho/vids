@@ -297,6 +297,7 @@ def run(video_id: str) -> None:
             frames = extract_frames(video, vdir, segments, job)
             write_json(vdir / "frames.json", frames)
 
+        llm.set_status_hook(lambda msg: job.update(note=msg))
         ndir = vdir / "segments"
         ndir.mkdir(exist_ok=True)
         todo = [s for s in segments if not (ndir / f"{s['index']:04d}.json").exists()]
@@ -311,20 +312,24 @@ def run(video_id: str) -> None:
                 ): s
                 for s in todo
             }
+            print(f"Watching {len(todo)} chunk(s) of {len(segments)}...", flush=True)
             for fut in as_completed(futures):
                 s = futures[fut]
                 write_json(ndir / f"{s['index']:04d}.json", fut.result())
                 done += 1
+                print(f"Finished chunk {done} of {len(segments)}", flush=True)
                 job.update(progress=done / len(segments), segments_done=done)
         notes = [read_json(ndir / f"{s['index']:04d}.json") for s in segments]
 
         job.update(stage="writing report", progress=0)
         report = synthesize(meta, notes, transcript)
         write_json(vdir / "report.json", report)
-        job.update(state="done", stage="done", progress=1)
+        job.update(state="done", stage="done", progress=1, note=None)
+        print("Analysis finished.", flush=True)
     except Exception as exc:  # surface any failure to the UI
         traceback.print_exc()
-        job.update(state="error", error=f"{type(exc).__name__}: {exc}")
+        msg = str(exc) if isinstance(exc, llm.AIError) else f"{type(exc).__name__}: {exc}"
+        job.update(state="error", error=msg, note=None)
 
 
 def delete(video_id: str) -> None:

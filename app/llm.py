@@ -10,7 +10,10 @@ where content is a string or a list of {"type": "text", "text": ...} /
 from __future__ import annotations
 
 import base64
+import re
 import threading
+import time
+from typing import Callable
 from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel
@@ -18,6 +21,25 @@ from pydantic import BaseModel
 from . import config
 
 T = TypeVar("T", bound=BaseModel)
+
+
+_status_hook: Callable[[str | None], None] | None = None
+
+
+def set_status_hook(hook: Callable[[str | None], None] | None) -> None:
+    """Lets the pipeline show messages like "waiting 40s for the rate limit" in the UI."""
+    global _status_hook
+    _status_hook = hook
+
+
+def _report(message: str | None) -> None:
+    if message:
+        print(message, flush=True)
+    if _status_hook:
+        try:
+            _status_hook(message)
+        except Exception:
+            pass
 
 
 class RefusalError(RuntimeError):
@@ -76,10 +98,8 @@ def _gemini_locked():
             api_key=config.GEMINI_API_KEY,
             http_options=types.HttpOptions(
                 timeout=600_000,  # milliseconds
-                # The free tier allows only a few requests per minute, so back off and retry on 429s.
-                retry_options=types.HttpRetryOptions(
-                    attempts=8, initial_delay=15, max_delay=90, http_status_codes=[408, 429, 500, 502, 503, 504],
-                ),
+                # Retries are done in _gemini_call so the wait can be shown to the user.
+                retry_options=types.HttpRetryOptions(attempts=1),
                 **({"base_url": config.GEMINI_BASE_URL} if config.GEMINI_BASE_URL else {}),
             ),
         )
@@ -119,6 +139,14 @@ def _gemini_text(response: Any) -> str:
     return text
 
 
+def _retry_delay(err: Exception, attempt: int) -> float:
+    """Gemini's 429 errors say how long to wait ("retryDelay": "37s"); otherwise back off."""
+    m = re.search(r"retryDelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", str(err))
+    if m:
+        return min(120.0, float(m.group(1)) + 2)
+    return min(90.0, 10.0 * (2 ** attempt))
+
+
 def _gemini_call(system: str, messages: list[dict], max_tokens: int, schema: Type[BaseModel] | None) -> str:
     from google.genai import errors, types
 
@@ -126,18 +154,32 @@ def _gemini_call(system: str, messages: list[dict], max_tokens: int, schema: Typ
     if schema is not None:
         cfg.response_mime_type = "application/json"
         cfg.response_schema = schema
-    try:
-        response = _gemini().models.generate_content(
-            model=config.GEMINI_MODEL, contents=_gemini_contents(messages), config=cfg,
-        )
-    except errors.APIError as e:
-        if e.code == 429:
-            raise AIError("Gemini's free-tier limit was reached. Wait a while (or until tomorrow for the daily "
-                          "limit) and press Retry; finished parts are kept.") from e
-        if e.code in (400, 401, 403) and "API key" in str(e):
-            raise AIError("Gemini rejected the API key. Check GEMINI_API_KEY in your .env file.") from e
-        raise AIError(f"Gemini error {e.code}: {e}") from e
-    return _gemini_text(response)
+    contents = _gemini_contents(messages)
+    attempts = 10
+    for attempt in range(attempts):
+        try:
+            response = _gemini().models.generate_content(model=config.GEMINI_MODEL, contents=contents, config=cfg)
+            return _gemini_text(response)
+        except errors.APIError as e:
+            text = str(e)
+            if e.code in (400, 401, 403) and "API key" in text:
+                raise AIError("Gemini rejected the API key. Check GEMINI_API_KEY in your .env file.") from e
+            if e.code == 404:
+                raise AIError(f"Gemini doesn't know the model '{config.GEMINI_MODEL}'. Set VID_GEMINI_MODEL in .env "
+                              "to a current model name (see ai.google.dev/gemini-api/docs/models).") from e
+            if e.code == 429 and "PerDay" in text:
+                raise AIError("Gemini's free daily limit is used up. Press Retry tomorrow; finished parts are kept.") from e
+            if e.code not in (408, 429, 500, 502, 503, 504) or attempt == attempts - 1:
+                if e.code == 429:
+                    raise AIError("Gemini's free-tier limit was reached. Wait a while and press Retry; "
+                                  "finished parts are kept.") from e
+                raise AIError(f"Gemini error {e.code}: {e}") from e
+            delay = _retry_delay(e, attempt)
+            why = "free-tier limit (requests per minute)" if e.code == 429 else f"Gemini is busy (error {e.code})"
+            _report(f"Waiting {delay:.0f}s: {why}. It will continue by itself.")
+            time.sleep(delay)
+            _report(None)
+    raise AIError("Gemini did not answer.")
 
 
 def _gemini_parse(system: str, messages: list[dict], out: Type[T], max_tokens: int) -> T:
