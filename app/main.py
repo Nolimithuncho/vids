@@ -290,7 +290,8 @@ def clear_chat(video_id: str):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    # no-store so the browser always picks up a new version of the page after an update
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
