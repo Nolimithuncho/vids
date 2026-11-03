@@ -61,6 +61,9 @@ button.primary:disabled { opacity: .5; cursor: default; }
 button.link { background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
 ul { padding-left: 20px; margin: 4px 0; }
 .err { color: var(--err); }
+.export { margin: 16px 0 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.export a.primary { display: inline-block; text-decoration: none; background: var(--accent); color: #fff;
+                    border-radius: 8px; padding: 9px 14px; margin-top: 6px; }
 a.clip { font-size: 13px; color: var(--muted); text-decoration: none; border: 1px solid var(--line); border-radius: 6px;
          padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
 a.clip:hover { color: var(--accent); border-color: var(--accent); }
@@ -158,11 +161,16 @@ async function videoPage(id) {
   if (!res.ok) { $("#app").innerHTML = `<p class="err">Video not found.</p>`; return; }
   const d = await res.json();
   const s = d.status;
+  const exportBox = (d.transcript && d.frames) ? `<div class="export">
+      <strong>Use it with Claude (or any chat AI)</strong>
+      <div class="muted">Downloads a small zip: the transcript, ${Math.min(15, Math.ceil(d.frames.length / 12))} picture sheets of frames with timestamps, and a ready-made prompt. Upload those files to a claude.ai chat instead of the video.</div>
+      <a class="primary" href="/api/videos/${id}/export" download>⬇ Download for Claude</a></div>` : "";
   if (s.state !== "done") {
     $("#app").innerHTML = `
       <div class="panel">
         <h2>${esc(d.meta.filename)}</h2>
         <p class="muted">${d.meta.duration ? fmt(d.meta.duration) + " long · " : ""}${s.state === "error" ? "" : "Analyzing. You can leave this page; it keeps going."}</p>
+        ${exportBox}
         ${s.state === "error"
           ? `<p class="err">${esc(s.error)}</p><button class="primary" onclick="retry('${id}')">Retry</button>
              <p class="muted">Retry continues from where it stopped.</p>`
@@ -179,7 +187,7 @@ async function videoPage(id) {
   $("#app").innerHTML = `
     <div class="layout">
       <div class="sticky"><video controls preload="metadata" src="/api/videos/${id}/file"></video>
-        <p class="muted">${esc(d.meta.filename)} · ${fmt(d.meta.duration)} · <button class="link" onclick="reanalyze('${id}')">re-analyze</button> · <button class="link" onclick="del('${id}')">delete</button></p></div>
+        <p class="muted">${esc(d.meta.filename)} · ${fmt(d.meta.duration)} · <button class="link" onclick="reanalyze('${id}')">re-analyze</button> · <button class="link" onclick="del('${id}')">delete</button></p>${exportBox}</div>
       <div class="panel">
         <div class="tabs">${["Overview","Steps","Chapters","Scenes","Transcript","Clips","Ask"].map((t,i) =>
           `<button data-tab="${t}" class="${i?"":"on"}">${t}</button>`).join("")}</div>

@@ -60,6 +60,13 @@ The first run downloads the Whisper model (about 500 MB for `small`). With an NV
 much faster; on CPU, expect very roughly 1 minute of processing per 5 to 10 minutes of audio with `small`.
 Set `VID_WHISPER_MODEL=base` for speed or `large-v3` for accuracy.
 
+## Download for Claude
+
+Every video page has a **Download for Claude** button once the transcript and frames are done (even if the
+AI step hasn't run or hit a limit). It gives you a small zip with `transcript.txt`, up to 15 picture sheets
+of frames labeled with timestamps, and a ready-made prompt. Upload those to a claude.ai chat (or any chat AI
+that takes images) instead of the video, paste the prompt, and it can work through the video from there.
+
 ## Cutting clips
 
 - **Precise** (default) re-encodes the clip so it starts on the exact frame. It takes roughly as long as

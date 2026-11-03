@@ -10,11 +10,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import clips, config, llm, pipeline
+from . import clips, config, export, llm, pipeline
 from .pipeline import fmt_ts, read_json, write_json
 
 app = FastAPI(title="Vid Explains")
@@ -169,6 +169,22 @@ def delete(video_id: str):
         raise HTTPException(409, "Still processing")
     pipeline.delete(video_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- export
+
+
+@app.get("/api/videos/{video_id}/export")
+def export_for_ai(video_id: str):
+    """Zip with transcript + labeled frame sheets + prompt, to hand to claude.ai or another chat AI."""
+    vdir = _vdir(video_id)
+    try:
+        name, data = export.build(vdir)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    from urllib.parse import quote
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(name)}"})
 
 
 # ---------------------------------------------------------------- clips
