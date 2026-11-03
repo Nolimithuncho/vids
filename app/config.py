@@ -60,8 +60,11 @@ USE_FALLBACKS = os.environ.get("VID_USE_FALLBACKS", "1") == "1"
 PARALLEL_SEGMENTS = int(os.environ.get("VID_PARALLEL_SEGMENTS", "2" if PROVIDER == "gemini" else "4"))
 
 # Video chunking
-SEGMENT_SECONDS = int(os.environ.get("VID_SEGMENT_SECONDS", "300"))  # 5 minute chunks
-FRAMES_PER_SEGMENT = int(os.environ.get("VID_FRAMES_PER_SEGMENT", "30"))
+# Gemini's free tier allows very few requests per day (as few as 20), so with Gemini the video is
+# watched in 30 minute chunks (one request each) instead of 5 minute ones. Same frame density.
+_GEMINI = PROVIDER == "gemini"
+SEGMENT_SECONDS = int(os.environ.get("VID_SEGMENT_SECONDS", "1800" if _GEMINI else "300"))
+FRAMES_PER_SEGMENT = int(os.environ.get("VID_FRAMES_PER_SEGMENT", "150" if _GEMINI else "30"))
 MIN_FRAME_GAP = float(os.environ.get("VID_MIN_FRAME_GAP", "2"))  # seconds
 FRAME_WIDTH = int(os.environ.get("VID_FRAME_WIDTH", "768"))
 

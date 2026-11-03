@@ -300,6 +300,12 @@ def run(video_id: str) -> None:
         llm.set_status_hook(lambda msg: job.update(note=msg))
         ndir = vdir / "segments"
         ndir.mkdir(exist_ok=True)
+        # If the chunk length changed since an earlier run, old chunk notes no longer line up.
+        plan = {"segment_seconds": config.SEGMENT_SECONDS}
+        if read_json(vdir / "segments_plan.json") != plan:
+            for old in ndir.glob("*.json"):
+                old.unlink()
+            write_json(vdir / "segments_plan.json", plan)
         todo = [s for s in segments if not (ndir / f"{s['index']:04d}.json").exists()]
         job.update(stage="watching", progress=(len(segments) - len(todo)) / len(segments),
                    segments_total=len(segments))
@@ -307,7 +313,7 @@ def run(video_id: str) -> None:
         with ThreadPoolExecutor(max_workers=config.PARALLEL_SEGMENTS) as pool:
             futures = {
                 pool.submit(
-                    analyze_segment, vdir, s, [f for f in frames if f["segment"] == s["index"]],
+                    analyze_segment, vdir, s, [f for f in frames if s["start"] <= f["time"] < s["end"]],
                     transcript, duration,
                 ): s
                 for s in todo

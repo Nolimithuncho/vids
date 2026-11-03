@@ -179,6 +179,15 @@ def _gemini_call(system: str, messages: list[dict], max_tokens: int, schema: Typ
             _report(f"Waiting {delay:.0f}s: {why}. It will continue by itself.")
             time.sleep(delay)
             _report(None)
+        except (AIError, RefusalError):
+            raise
+        except Exception as e:  # network trouble (no internet, connection reset, timeout)
+            if attempt >= 4:
+                raise AIError(f"Couldn't reach Gemini ({type(e).__name__}: {e}). Check your internet and press Retry.") from e
+            delay = 10.0 * (attempt + 1)
+            _report(f"Waiting {delay:.0f}s: couldn't reach Gemini ({type(e).__name__}). It will try again by itself.")
+            time.sleep(delay)
+            _report(None)
     raise AIError("Gemini did not answer.")
 
 

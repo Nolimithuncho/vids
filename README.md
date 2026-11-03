@@ -13,7 +13,9 @@ custom range, and "Split the whole video" turns it into one file per chapter, st
 1. **Upload.** The file streams straight to disk, so multi-GB videos are fine.
 2. **Transcribe.** ffmpeg pulls out the audio and [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
    transcribes it locally (free, no upload).
-3. **Sample frames.** The video is cut into 5 minute chunks and 30 frames are sampled from each one (one every 10 seconds).
+3. **Sample frames.** The video is cut into chunks and frames are sampled from each one: 30 minute chunks with
+   150 frames (one every 12 seconds) for Gemini, to stay within its small free daily limit; 5 minute chunks with
+   30 frames for Claude.
 4. **Watch.** Each chunk's frames plus its slice of the transcript go to the AI (Google Gemini by default,
    or Claude), which
    writes structured notes: every action performed (with exact values, settings and quantities), scenes,
@@ -71,7 +73,9 @@ instant. Delete that folder to free disk space.
 ## Which AI, and cost
 
 **Gemini (default, `VID_PROVIDER=gemini`).** Free tier, no card needed. The free tier has per-minute and
-per-day request limits, so the app analyzes 2 chunks at a time and waits and retries automatically when it
+per-day request limits (as low as 20 requests a day per model). A video needs one request per 30 minutes of
+video plus one for the report, and each question in Ask is one more. Different models have separate limits,
+so if one runs out you can switch with `VID_GEMINI_MODEL` (for example `gemini-flash-lite-latest`). The app waits and retries automatically when it
 hits the per-minute limit. A long video can still use up the daily limit; if that happens the job stops
 with a message, and pressing **Retry** the next day continues where it left off. Note that Google may use
 data sent on the free tier to improve its products, so don't upload anything private. Change the model with

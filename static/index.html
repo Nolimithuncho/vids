@@ -167,7 +167,7 @@ async function videoPage(id) {
           ? `<p class="err">${esc(s.error)}</p><button class="primary" onclick="retry('${id}')">Retry</button>
              <p class="muted">Retry continues from where it stopped.</p>`
           : `<div>${esc(statusLabel(s))}</div>${s.note ? `<p class="muted">⏳ ${esc(s.note)}</p>` : ""}
-             ${s.stage === "watching" ? `<p class="muted">The AI looks at each 5-minute chunk; each one can take a minute or two on the free tier.</p>` : ""}
+             ${s.stage === "watching" ? `<p class="muted">The AI looks at the video one chunk at a time; each chunk can take a few minutes.</p>` : ""}
              <div class="bar"><div style="width:${(s.progress||0)*100}%"></div></div>
              <ol class="muted">${["probing","transcribing","sampling frames","watching","writing report"].map(st =>
                `<li${st === s.stage ? ' style="color:var(--text);font-weight:600"' : ""}>${st}</li>`).join("")}</ol>`}
