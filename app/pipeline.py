@@ -104,16 +104,29 @@ def _get_whisper():
         return _whisper_model
 
 
+def _read_wav(path: Path):
+    """Read the 16 kHz mono 16-bit WAV that ffmpeg wrote, as float32 samples in [-1, 1]."""
+    import wave
+
+    import numpy as np
+
+    with wave.open(str(path), "rb") as w:
+        frames = w.readframes(w.getnframes())
+    return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+
+
 def transcribe(video: Path, vdir: Path, duration: float, job: Job) -> list[dict]:
     audio = vdir / "audio.wav"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(audio)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(audio)],
             check=True,
         )
         model = _get_whisper()
         with _whisper_lock:  # one transcription at a time; whisper already uses all cores
-            segments, info = model.transcribe(str(audio), vad_filter=True, beam_size=5)
+            # Pass decoded samples instead of the file path: faster-whisper's own decoder (PyAV)
+            # breaks with newer PyAV releases ("unexpected keyword argument 'metadata_errors'").
+            segments, info = model.transcribe(_read_wav(audio), vad_filter=True, beam_size=5)
             result = []
             for seg in segments:
                 text = seg.text.strip()
